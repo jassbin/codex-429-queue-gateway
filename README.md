@@ -2,7 +2,7 @@
 
 > A field-tested deep-dive into why OpenAI Codex Desktop (paired with a third-party OpenAI-compatible gateway) throws
 > `exceeded retry limit, last status: 429 Too Many Requests`, why proxy clients (CC Switch / Clash Verge) seem to "magically"
-> prevent it, and how a ~100-line local queue gateway fixes it permanently — without changing how you work.
+> prevent it, and how a ~200-line local queue gateway fixes it permanently — without changing how you work.
 >
 > Every conclusion below was verified with HTTP probes, stress tests, and app log forensics. No speculation.
 
@@ -76,7 +76,7 @@ Log forensics over ~4 months: **zero 429s** while the proxy client's local forwa
 appeared within hours of switching to a direct connection. The forwarder sits at `127.0.0.1:<port>` and forwards
 sequentially — the upstream never sees bursts. Same gateway, same provider — the buffer was the difference.
 
-## 3. The fix: a ~100-line local queue gateway
+## 3. The fix: a ~200-line local queue gateway
 
 [`queue_proxy.py`](./queue_proxy.py) — aiohttp, listens on `127.0.0.1:15731`, forwards to the upstream gateway:
 
@@ -103,9 +103,20 @@ request_max_retries = 10
 stream_max_retries = 10
 ```
 
+Run it (**no source edits needed** — the upstream comes from a flag):
+
+```bash
+python queue_proxy.py --upstream https://your-gateway.example.com
+# or via env:  set CODEX_GW_UPSTREAM=https://...  &&  python queue_proxy.py
+# tunables:    --port 15731   --max-inflight 4
+```
+
 Autostart: put a one-liner in your Startup folder
-(`pythonw.exe path\to\queue_proxy.py`), or run it however you like. Single-instance by design
-(a second copy exits because the port is taken). Logs to `~/.codex/queue_proxy.log`.
+(`pythonw.exe path\to\queue_proxy.py --upstream https://your-gateway.example.com`).
+Single-instance by design (a second copy reports "port already in use" and exits cleanly).
+
+Live stats: `curl http://127.0.0.1:15731/__stats` — current queue depth plus cumulative
+done / retried / failed counters. Logs to `~/.codex/queue_proxy.log`.
 
 Rollback: point `base_url` back at the upstream and kill the process.
 
